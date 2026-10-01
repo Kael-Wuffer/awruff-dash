@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AWRUFF — homelab control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="banner" class="banner" hidden></div>
+
+<header class="top">
+  <div class="brand">
+    <span class="brand-name" id="site-title">AWRUFF</span>
+    <span class="brand-sub" id="site-sub">HOMELAB CONTROL</span>
+  </div>
+
+  <div class="search">
+    <label class="sr-only" for="filter">Filter services</label>
+    <input id="filter" type="search" placeholder="FILTER SERVICES" autocomplete="off" spellcheck="false">
+    <span class="search-hint"><span class="dim">PRESS</span><kbd>/</kbd></span>
+  </div>
+
+  <div class="clock">
+    <time id="clock">--:--</time>
+    <span id="date" class="dim"></span>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button type="button" class="tab is-active" role="tab" aria-selected="true" data-tab="lab">LAB</button>
+  <button type="button" class="tab" role="tab" aria-selected="false" data-tab="workshop">WORKSHOP</button>
+  <span class="tabs-spacer"></span>
+  <div class="summary" id="summary"></div>
+</nav>
+
+<main>
+  <section id="panel-lab" role="tabpanel">
+    <div class="rule-head">
+      <span class="rule-label">VITALS</span>
+      <span class="rule-line"></span>
+      <span class="rule-meta" id="vitals-age">—</span>
+    </div>
+    <div class="rail" id="vitals"></div>
+    <div id="groups"></div>
+    <p class="empty" id="no-match" hidden>Nothing matches that.</p>
+  </section>
+
+  <section id="panel-workshop" role="tabpanel" hidden>
+    <div class="wk-top" id="wk-top"></div>
+    <div id="wk-groups"></div>
+  </section>
+</main>
+
+<footer>
+  <span id="foot-left">CT105 · OBSERVABILITY · TAILNET ONLY</span>
+  <span id="foot-right" class="dim">CONNECTING…</span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+# Pinned to the versions this was actually built and tested against on
+# 2026-10-01, discovered from the installed packages rather than guessed.
+# Unpinned versions are how a working container stops working six months
+# later for no reason you can see.
+fastapi==0.142.2
+uvicorn[standard]==0.46.0
+httpx==0.28.1
+PyYAML==6.0.3

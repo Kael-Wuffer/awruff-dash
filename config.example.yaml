@@ -1,0 +1,195 @@
+# dash.awruff.org — the half a machine cannot work out for itself.
+#
+# Containers are DISCOVERED, not listed. Anything Proxmox knows about turns
+# up on the page by itself. What you write here is only the human part:
+# what to call a thing, where it lives, which group it belongs in.
+#
+# Build CT106 tomorrow and it appears under UNSORTED with live stats and no
+# edit to this file. Give it four lines here and it moves somewhere sensible
+# with a proper name. That is the whole idea.
+#
+# Credentials are NOT in here. See .env.example.
+
+site:
+  title: AWRUFF
+  subtitle: HOMELAB CONTROL
+  poll_seconds: 10
+
+proxmox:
+  url: https://192.168.137.2:8006
+  node: Homelab          # must match the node name exactly — your shell prompt knows it
+  verify_ssl: false      # Proxmox serves its own certificate; this is a LAN address
+
+ip_prefix: "192.168.137."
+
+groups:
+  - MONITORING
+  - HOMELAB
+  - GAMES
+  - WEB
+  - ELSEWHERE
+
+# Containers nothing below claims land here, named by Proxmox.
+unclaimed_group: UNSORTED
+
+services:
+  # --- MONITORING ---------------------------------------------------------
+  # Grafana is listed first for vmid 105, so it is the tile that shows CT105's
+  # CPU and memory. Netdata and Prometheus live in the same container, and
+  # three tiles repeating identical numbers reads as a bug even though it is
+  # correct.
+  - name: Grafana
+    group: MONITORING
+    abbr: GF
+    href: http://100.106.166.62:3000
+    desc: dashboards / history
+    vmid: 105
+    check: http://127.0.0.1:3000
+
+  - name: Netdata
+    group: MONITORING
+    abbr: ND
+    href: http://100.106.166.62:19999
+    desc: live detail, all nodes
+    vmid: 105
+    check: http://127.0.0.1:19999/api/v1/info
+
+  - name: Prometheus
+    group: MONITORING
+    abbr: PR
+    href: http://100.106.166.62:9090
+    desc: metrics store
+    vmid: 105
+    check: http://127.0.0.1:9090/-/healthy
+
+  # --- HOMELAB ------------------------------------------------------------
+  - name: Proxmox
+    group: HOMELAB
+    abbr: PX
+    href: https://192.168.137.2:8006
+    desc: hypervisor
+
+  - name: iLO
+    group: HOMELAB
+    abbr: iL
+    href: https://192.168.137.50
+    desc: out-of-band management
+    # No check, deliberately. iLO rides on the shared network port and cannot
+    # be reached from anywhere inside the rack — only from the far end of the
+    # cable. A monitor here would be permanently and wrongly red.
+    note: reachable only from your PC
+
+  - name: Nextcloud
+    group: HOMELAB
+    abbr: NC
+    href: https://nextcloud.tail310fac.ts.net
+    desc: files
+    vmid: 103
+
+  - name: Navidrome
+    group: HOMELAB
+    abbr: NV
+    href: https://music.tail310fac.ts.net
+    desc: music
+    vmid: 104
+
+  # --- GAMES --------------------------------------------------------------
+  - name: Pterodactyl
+    group: GAMES
+    abbr: PT
+    href: http://192.168.137.13
+    desc: game server panel
+    vmid: 102
+    check: http://192.168.137.13
+
+  - name: Minecraft
+    group: GAMES
+    abbr: MC
+    href: https://mc.awruff.org
+    desc: mc.awruff.org via Vultr relay
+    vmid: 100        # the server runs on CT100, not with the panel on CT102
+
+  # --- WEB ----------------------------------------------------------------
+  - name: awruff.org
+    group: WEB
+    abbr: AW
+    href: https://awruff.org
+    desc: the site
+    vmid: 101
+    check: https://awruff.org
+
+  - name: awruff admin
+    group: WEB
+    abbr: AD
+    href: https://awruff.org/admin
+    desc: site editor
+    vmid: 101
+
+  - name: Uptime Kuma
+    group: WEB
+    abbr: UK
+    href: http://192.168.137.11:3001
+    desc: availability monitoring
+    vmid: 101
+    check: http://192.168.137.11:3001
+
+  # --- ELSEWHERE ----------------------------------------------------------
+  - name: Cloudflare
+    group: ELSEWHERE
+    abbr: CF
+    href: https://dash.cloudflare.com
+    desc: dns and the tunnel
+
+  - name: Tailscale
+    group: ELSEWHERE
+    abbr: TS
+    href: https://login.tailscale.com/admin
+    desc: tailnet admin
+
+  - name: Vultr
+    group: ELSEWHERE
+    abbr: VU
+    href: https://my.vultr.com
+    desc: frp-relay billing and console
+
+workshop:
+  before_you_build:
+    - name: Grafana — capacity
+      href: http://100.106.166.62:3000
+      desc: disk, memory and thin pool over time
+    - name: Proxmox — create CT
+      href: https://192.168.137.2:8006
+      desc: straight to the container wizard
+    - name: Links and Addresses
+      href: https://nextcloud.tail310fac.ts.net
+      desc: what is already taken
+    - name: System Template
+      href: https://nextcloud.tail310fac.ts.net
+      desc: start the note before the service
+
+  reference:
+    - name: Proxmox docs
+      href: https://pve.proxmox.com/pve-docs/
+      desc: the actual manual, not a forum post
+    - name: linuxserver.io
+      href: https://docs.linuxserver.io/
+      desc: images that behave
+    - name: Docker Hub
+      href: https://hub.docker.com/
+      desc: everything else
+
+  # Hand-written for now. v1.1 reads these out of the vault's "**Open.**"
+  # markers so the list maintains itself.
+  threads:
+    - text: Thin pool alert at 80% — not built yet
+      tone: warn
+    - text: Cloudflare tunnel token needs rotating
+      tone: bad
+    - text: Old Homepage on CT101 is still public
+      tone: bad
+    - text: Grafana admin password not in Bitwarden
+      tone: warn
+    - text: Loki + Alloy for centralised logs
+      tone: muted
+    - text: Scrutiny for SMART drive health
+      tone: muted
