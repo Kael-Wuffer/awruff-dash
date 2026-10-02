@@ -166,8 +166,7 @@ function renderVitals(v, containers, runningCount, totalCount) {
     meter('MEMORY', v.mem_pct, v.mem_pct, prev && prev.mem_pct),
     meter('LOAD', v.load1, v.load_pct, prev && prev.load1, 2, ''),
   );
-  host.append(hostGraph(hostHistory));
-  host.append(el('div', 'vital-note', `${v.cores} CORES · UP ${v.uptime_days} DAYS · LAST 5 MIN ABOVE`));
+  host.append(el('div', 'vital-note', `${v.cores} CORES · UP ${v.uptime_days} DAYS`));
   rail.append(host);
 
   // THIN POOL — the one that can take the whole lab down at once
@@ -244,6 +243,14 @@ function renderVitals(v, containers, runningCount, totalCount) {
     ct.append(row);
   });
   rail.append(ct);
+
+  // ACTIVITY — its own full-width card, not squeezed into HOST, so the
+  // other three stay short and the trace itself gets more room to read.
+  const activity = vitalCard('ACTIVITY', '5 MIN', 'muted');
+  activity.classList.add('vital-wide');
+  activity.append(hostGraph(hostHistory));
+  activity.append(el('div', 'vital-note', 'CPU (bright) over LOAD (dim) — resets on reload'));
+  rail.append(activity);
 
   prevVitals = v;
 }
