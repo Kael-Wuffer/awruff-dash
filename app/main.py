@@ -18,7 +18,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config as config_mod
@@ -46,13 +46,32 @@ class Runtime:
     cache: dict | None = None
     cached_at: float = 0.0
     boot_error: str | None = None
+    index_html: str = ""
 
 
 rt = Runtime()
 
 
+def _versioned_index() -> str:
+    """index.html with app.css/app.js tagged by each file's own mtime.
+
+    Browsers have no reason to re-fetch a plain 'app.css' after a deploy —
+    nothing about that URL changed. Tagging it '?v=<mtime>' means the URL
+    itself changes whenever the file does, so a stale cached copy can't
+    survive a deploy silently. Computed once at startup: a new file would
+    mean a new container anyway, so there's no point redoing this per request.
+    """
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    css_v = int((STATIC / "app.css").stat().st_mtime)
+    js_v = int((STATIC / "app.js").stat().st_mtime)
+    html = html.replace('href="app.css"', f'href="app.css?v={css_v}"')
+    html = html.replace('src="app.js"', f'src="app.js?v={js_v}"')
+    return html
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    rt.index_html = _versioned_index()
     try:
         rt.cfg = config_mod.load(CONFIG_PATH)
         rt.pve = Proxmox(
@@ -110,6 +129,11 @@ async def api_state():
 async def api_health():
     """For Uptime Kuma, and for answering 'is it the page or the data'."""
     return {"ok": rt.boot_error is None, "error": rt.boot_error}
+
+
+@app.get("/", include_in_schema=False)
+async def index():
+    return HTMLResponse(rt.index_html)
 
 
 app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")

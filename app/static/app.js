@@ -24,13 +24,41 @@ const toneColor = (tone) => ({
   good: 'var(--good)', warn: 'var(--warn)', bad: 'var(--bad)', muted: 'var(--faint)',
 }[tone] || 'var(--faint)');
 
+/* Counts an element's text from one number to another over half a second,
+   instead of snapping straight to the new value. Only used for the handful
+   of headline numbers — the point is a dashboard that feels alive, not a
+   page where every digit is constantly flickering. 'from' being null/undefined
+   means there's nothing to count up from (first load, or the card didn't
+   exist a moment ago), so it just shows the final value immediately.
+
+   Deliberately setInterval, not requestAnimationFrame: rAF is tied to the
+   browser's paint cycle and gets throttled hard the moment this window
+   isn't the focused one — exactly the normal state for a dashboard sitting
+   on a second monitor. setInterval keeps counting regardless. */
+function animateNumber(target, from, to, decimals, suffix) {
+  if (from === null || from === undefined || from === to) {
+    target.textContent = to.toFixed(decimals) + suffix;
+    return;
+  }
+  const duration = 500;
+  const start = Date.now();
+  const timer = setInterval(() => {
+    const t = Math.min(1, (Date.now() - start) / duration);
+    const eased = 1 - (1 - t) * (1 - t); // ease-out: fast start, settles in
+    target.textContent = (from + (to - from) * eased).toFixed(decimals) + suffix;
+    if (t >= 1) clearInterval(timer);
+  }, 40);
+}
+
 /* A meter is a labelled value plus a segmented bar. Above 90% it goes red,
    above 75% amber — so a problem is visible from across the room rather than
    requiring you to read the number. */
-function meter(label, valueText, pct) {
+function meter(label, value, pct, prev, decimals = 1, suffix = '%') {
   const wrap = el('div', 'meter');
   const head = el('div', 'meter-head');
-  head.append(el('span', null, label), el('b', null, valueText));
+  const valueEl = el('b');
+  head.append(el('span', null, label), valueEl);
+  animateNumber(valueEl, prev, value, decimals, suffix);
 
   const track = el('div', 'track');
   if (pct >= 90) track.classList.add('is-bad');
@@ -44,7 +72,11 @@ function meter(label, valueText, pct) {
 }
 
 function vitalCard(title, rightText, rightTone) {
-  const card = el('div', 'vital');
+  // vital-flash plays automatically on insertion — no need to retrigger it
+  // by hand like #vitals-age's pulse, because renderVitals() throws every
+  // card away and builds fresh ones each cycle, so this IS a fresh element
+  // every single time.
+  const card = el('div', 'vital vital-flash');
   const head = el('div', 'vital-head');
   const right = el('span', toneClass(rightTone), rightText);
   head.append(el('span', null, title), right);
@@ -54,18 +86,21 @@ function vitalCard(title, rightText, rightTone) {
 
 /* ------------------------------------------------------------------ */
 
+let prevVitals = null;
+
 function renderVitals(v, containers, runningCount, totalCount) {
   const rail = $('#vitals');
   rail.replaceChildren();
   if (!v) return;
+  const prev = prevVitals;
 
   // HOST
   const host = vitalCard('HOST', v.cpu_pct >= 80 ? 'BUSY' : 'NOMINAL',
                          v.cpu_pct >= 80 ? 'warn' : 'good');
   host.append(
-    meter('CPU', v.cpu_pct + '%', v.cpu_pct),
-    meter('MEMORY', v.mem_pct + '%', v.mem_pct),
-    meter('LOAD', v.load1.toFixed(2), v.load_pct),
+    meter('CPU', v.cpu_pct, v.cpu_pct, prev && prev.cpu_pct),
+    meter('MEMORY', v.mem_pct, v.mem_pct, prev && prev.mem_pct),
+    meter('LOAD', v.load1, v.load_pct, prev && prev.load1, 2, ''),
   );
   host.append(el('div', 'vital-note', `${v.cores} CORES · UP ${v.uptime_days} DAYS`));
   rail.append(host);
@@ -81,7 +116,9 @@ function renderVitals(v, containers, runningCount, totalCount) {
     ring.style.background =
       `conic-gradient(${pct >= 80 ? 'var(--bad)' : 'var(--amber)'} 0 ${pct}%, rgba(255,163,71,0.12) ${pct}% 100%)`;
     const core = el('div', 'ring-core');
-    core.append(el('b', null, pct + '%'), el('span', null, 'USED'));
+    const pctEl = el('b');
+    animateNumber(pctEl, prev && prev.thin_pool && prev.thin_pool.pct, pct, 1, '%');
+    core.append(pctEl, el('span', null, 'USED'));
     ring.append(core);
 
     const facts = el('div', 'ring-facts');
@@ -109,7 +146,9 @@ function renderVitals(v, containers, runningCount, totalCount) {
     const card = vitalCard(vault.name.toUpperCase(), vault.pct >= 85 ? 'FULL' : 'OK',
                            vault.pct >= 85 ? 'bad' : 'good');
     const big = el('div', 'vital-big');
-    big.append(document.createTextNode(String(Math.round(vault.free_gb))));
+    const freeEl = el('span');
+    animateNumber(freeEl, prev && prev.vault && prev.vault.free_gb, vault.free_gb, 0, '');
+    big.append(freeEl);
     big.append(el('small', null, ' GB FREE'));
     card.append(big);
     card.append(el('div', 'vital-note',
@@ -140,6 +179,8 @@ function renderVitals(v, containers, runningCount, totalCount) {
     ct.append(row);
   });
   rail.append(ct);
+
+  prevVitals = v;
 }
 
 function renderTile(s) {
