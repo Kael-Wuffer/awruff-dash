@@ -129,6 +129,15 @@ main { padding: 28px var(--gutter) 0; }
 .rule-line { flex-grow: 1; height: 1px; background: var(--line); }
 .rule-meta { font-size: 9px; letter-spacing: 0.18em; color: var(--faint); }
 
+/* A brief flash on #vitals-age every time a refresh actually completes —
+   proof of life for the stretches where every number legitimately stays
+   the same (idle CPU, flat memory, untouched disk). */
+@keyframes live-pulse {
+  0%   { color: var(--amber); text-shadow: 0 0 8px rgba(255, 179, 71, 0.85); }
+  100% { color: var(--faint); text-shadow: none; }
+}
+.rule-meta.pulse { animation: live-pulse 0.6s ease-out; }
+
 /* ---------- vitals ---------- */
 .rail {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -154,6 +163,7 @@ main { padding: 28px var(--gutter) 0; }
 }
 .meter-head b { font-size: 14px; font-weight: 400; color: var(--amber); }
 .track {
+  display: block;
   position: relative; height: 9px; overflow: hidden;
   background: var(--track); border: 1px solid rgba(255,163,71,0.18); border-radius: 1px;
 }
@@ -195,10 +205,10 @@ main { padding: 28px var(--gutter) 0; }
 .tile:hover { border-color: var(--line-strong); background: #17110b; }
 .tile-head { display: flex; align-items: center; gap: 11px; margin-bottom: 11px; }
 .tile-abbr {
-  flex: none; width: 30px; height: 30px;
+  flex: none; width: 32px; height: 32px;
   display: flex; align-items: center; justify-content: center;
   border: 1px solid var(--line-strong); border-radius: 2px;
-  color: var(--amber); font-size: 11px; font-weight: 600;
+  color: var(--amber); font-size: 10px; font-weight: 600;
 }
 .tile-id { flex-grow: 1; min-width: 0; }
 .tile-name { display: block; font-size: 13px; color: var(--text); }
@@ -212,7 +222,7 @@ main { padding: 28px var(--gutter) 0; }
 .is-muted { color: var(--faint); }
 
 .tile-bars { display: flex; gap: 8px; }
-.bar { flex-grow: 1; }
+.bar { display: block; flex-grow: 1; }
 .bar-head {
   display: flex; justify-content: space-between;
   font-size: 8px; letter-spacing: 0.14em; color: var(--faint); margin-bottom: 3px;

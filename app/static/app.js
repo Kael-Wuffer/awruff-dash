@@ -101,8 +101,10 @@ function renderVitals(v, containers, runningCount, totalCount) {
     rail.append(card);
   }
 
-  // LARGEST POOL (storage-vault, normally)
-  const vault = v.vault || (v.pools && v.pools[0]);
+  // STORAGE-VAULT. No fallback to a different pool on purpose: that used to
+  // quietly paper over storage-vault going missing instead of saying so —
+  // see the error banner for why, when this happens.
+  const vault = v.vault;
   if (vault) {
     const card = vitalCard(vault.name.toUpperCase(), vault.pct >= 85 ? 'FULL' : 'OK',
                            vault.pct >= 85 ? 'bad' : 'good');
@@ -119,6 +121,10 @@ function renderVitals(v, containers, runningCount, totalCount) {
     fill.style.width = vault.pct + '%';
     track.append(fill);
     card.append(track);
+    rail.append(card);
+  } else {
+    const card = vitalCard('STORAGE-VAULT', 'MISSING', 'bad');
+    card.append(el('div', 'vital-note', 'See the error banner above.'));
     rail.append(card);
   }
 
@@ -339,7 +345,15 @@ async function refresh() {
     renderWorkshop(s.workshop, s.vitals);
     applyFilter();
 
-    $('#vitals-age').textContent = 'LIVE · ' + new Date().toLocaleTimeString('en-GB', { hour12: false });
+    const ageEl = $('#vitals-age');
+    ageEl.textContent = 'LIVE · ' + new Date().toLocaleTimeString('en-GB', { hour12: false });
+    // Restart the pulse animation even if it's already mid-flash from the
+    // last cycle: removing the class, forcing layout to notice (reading
+    // offsetWidth), then re-adding it is the standard trick for that.
+    ageEl.classList.remove('pulse');
+    void ageEl.offsetWidth;
+    ageEl.classList.add('pulse');
+
     $('#foot-right').textContent = 'NODE ' + (s.node || '?').toUpperCase();
     $('#foot-right').className = '';
   } catch (err) {

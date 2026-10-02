@@ -1,6 +1,6 @@
 """A very small read-only Proxmox API client.
 
-Only the four endpoints the dashboard needs. The token this uses has the
+Only the endpoints the dashboard needs. The token this uses has the
 PVEAuditor role, which cannot start, stop, or change anything — so the worst
 a bug in here can do is show you a wrong number.
 """
@@ -78,10 +78,29 @@ class Proxmox:
         """Every storage pool with used/total bytes."""
         return await self._get(f"/nodes/{self.node}/storage") or []
 
-    async def next_vmid(self) -> int | None:
-        """The ID Proxmox itself would hand out next."""
+    async def next_vmid(self) -> tuple[int | None, str | None]:
+        """The ID Proxmox itself would hand out next.
+
+        Returns (value, error). Still never raises — one flaky endpoint
+        should not blank the whole page — but it no longer throws the reason
+        away either, so the caller can decide whether to mention it.
+        """
         try:
             value = await self._get("/cluster/nextid")
-            return int(value) if value is not None else None
-        except (ProxmoxError, TypeError, ValueError):
-            return None
+            if value is None:
+                return None, "Proxmox returned nothing for /cluster/nextid"
+            return int(value), None
+        except (ProxmoxError, TypeError, ValueError) as exc:
+            return None, str(exc)
+
+    async def guest_config(self, kind: str, node: str, vmid: int) -> dict:
+        """One VM or container's own config — used to read its static IP.
+
+        Takes `node` per-guest (from guests()'s own 'node' field) rather than
+        assuming self.node, so this keeps working once a second node exists.
+
+        Unlike next_vmid(), this one is allowed to raise — the caller fans
+        this out over every guest at once and wants to know which (if any)
+        failed, rather than finding out never.
+        """
+        return await self._get(f"/nodes/{node}/{kind}/{vmid}/config") or {}

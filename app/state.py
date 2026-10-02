@@ -8,7 +8,9 @@ number came from, and a new data source later is a change in here only.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
+from urllib.parse import urlparse
 
 import httpx
 
@@ -17,6 +19,8 @@ from .proxmox import Proxmox, ProxmoxError
 
 GIB = 1024 ** 3
 GB = 1000 ** 3
+
+_NET_IP_RE = re.compile(r"ip=(\d{1,3}(?:\.\d{1,3}){3})")
 
 
 def _pct(used, total) -> float:
@@ -150,11 +154,54 @@ def _service_payload(svc: Service, guest: dict | None, check: dict | None,
     }
 
 
+def _used_ip_octets(configs: list[dict], prefix: str) -> set[int]:
+    """Last-octet numbers already claimed by a container/VM's own net config.
+
+    Reads every 'net0', 'net1', ... line Proxmox returns for each guest and
+    pulls out 'ip=192.168.137.16/24' style addresses. A guest on DHCP has no
+    such address here and is simply invisible to this — there is no way to
+    ask Proxmox for a DHCP lease from this endpoint.
+    """
+    used: set[int] = set()
+    if not prefix:
+        return used
+    for guest_cfg in configs:
+        for key, value in guest_cfg.items():
+            if not key.startswith("net") or not isinstance(value, str):
+                continue
+            match = _NET_IP_RE.search(value)
+            if not match:
+                continue
+            ip = match.group(1)
+            if ip.startswith(prefix):
+                try:
+                    used.add(int(ip.rsplit(".", 1)[-1]))
+                except ValueError:
+                    pass
+    return used
+
+
+def _next_free_ip(prefix: str, taken: set[int]) -> str | None:
+    """Lowest address in prefix.0-255 not claimed by a known guest.
+
+    This only knows what Proxmox knows. Anything with a static IP that is
+    not a Proxmox guest — iLO, a printer, a switch's management address — is
+    invisible here and could still collide. The front end says so.
+    """
+    if not prefix:
+        return None
+    reserved = taken | {0, 1, 255}
+    for last in range(2, 255):
+        if last not in reserved:
+            return f"{prefix}{last}"
+    return None
+
+
 async def build_state(cfg: Config, pve: Proxmox, http: httpx.AsyncClient) -> dict:
     errors: list[str] = []
 
     try:
-        node, guests, storages, nextid = await asyncio.gather(
+        node, guests, storages, (nextid, nextid_err) = await asyncio.gather(
             pve.node_status(), pve.guests(), pve.storage(), pve.next_vmid()
         )
     except ProxmoxError as exc:
@@ -170,6 +217,9 @@ async def build_state(cfg: Config, pve: Proxmox, http: httpx.AsyncClient) -> dic
             "workshop": {"threads": cfg.threads, "reference": cfg.reference,
                          "before_you_build": cfg.before_you_build},
         }
+
+    if nextid_err:
+        errors.append(f"Couldn't work out the next free VMID: {nextid_err}")
 
     index = _guest_index(guests)
 
@@ -235,10 +285,43 @@ async def build_state(cfg: Config, pve: Proxmox, http: httpx.AsyncClient) -> dic
     vitals = _vitals(node, storages)
     running = [g for g in index.values() if g["running"]]
 
-    used_ips = sorted({int(v) for v in []})  # reserved for a later ARP sweep
+    # storage-vault going missing once already produced a confusing bug (two
+    # cards quietly showing the same pool) before we found the real cause.
+    # Say so on the page this time instead of letting it happen silently again.
+    if storages and vitals["vault"] is None:
+        errors.append(
+            "'storage-vault' isn't in Proxmox's storage list right now — "
+            "check 'pvesm status' on the host. Likely disabled, or its "
+            "'nodes' restriction points at the wrong node name."
+        )
+
+    guest_configs: list[dict] = []
+    if cfg.ip_prefix and guests:
+        results = await asyncio.gather(*[
+            pve.guest_config(g["type"], g["node"], g["vmid"])
+            for g in guests if g.get("vmid") is not None and g.get("node")
+        ], return_exceptions=True)
+        guest_configs = [r for r in results if isinstance(r, dict)]
+        failures = len(results) - len(guest_configs)
+        if failures:
+            errors.append(
+                f"Couldn't read network settings for {failures} of "
+                f"{len(results)} container(s) — 'next free IP' may be based "
+                "on incomplete data."
+            )
+
+    taken_octets = _used_ip_octets(guest_configs, cfg.ip_prefix)
+    host = urlparse(cfg.proxmox.url).hostname or ""
+    if host.startswith(cfg.ip_prefix):
+        try:
+            taken_octets.add(int(host.rsplit(".", 1)[-1]))
+        except ValueError:
+            pass
+    next_ip = _next_free_ip(cfg.ip_prefix, taken_octets)
+
     workshop = {
         "next_vmid": nextid,
-        "next_ip": None,
+        "next_ip": next_ip,
         "ip_prefix": cfg.ip_prefix,
         "threads": cfg.threads,
         "reference": cfg.reference,
