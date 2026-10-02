@@ -71,12 +71,75 @@ function meter(label, value, pct, prev, decimals = 1, suffix = '%') {
   return wrap;
 }
 
+/* Last 5 minutes of host CPU and load, remembered in the browser only —
+   there's no history store yet, so this resets on reload. Real multi-day
+   history is a Prometheus job for later; this is an honest preview of that
+   idea using data the page is already polling anyway. */
+const HISTORY_MAX = 30; // 30 x 10s polls = 5 minutes
+const hostHistory = [];
+
+function pushHistory(v) {
+  hostHistory.push({ cpu: v.cpu_pct, load: v.load_pct });
+  if (hostHistory.length > HISTORY_MAX) hostHistory.shift();
+}
+
+/* Two stacked, semi-transparent "mountains" — CPU brighter/on top, load
+   dimmer/underneath. Stepped rather than curved to match the segmented
+   meters everywhere else. Y-axis auto-scales to whatever's actually in the
+   window, so real movement stays visible even when both numbers are small. */
+function hostGraph(history) {
+  const w = 280, h = 44;
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.setAttribute('class', 'host-graph');
+  svg.setAttribute('preserveAspectRatio', 'none');
+
+  if (history.length < 2) return svg;
+
+  const allValues = history.flatMap((p) => [p.cpu, p.load]);
+  const maxY = Math.max(20, ...allValues) * 1.15;
+  const stepX = w / (history.length - 1);
+
+  const layer = (key, fillOpacity, strokeOpacity) => {
+    const values = history.map((p) => p[key]);
+    let fillD = `M 0 ${h}`;
+    let strokeD = '';
+    let prevY = null;
+    values.forEach((val, i) => {
+      const x = i * stepX;
+      const y = h - (val / maxY) * h;
+      if (prevY === null) {
+        fillD += ` L 0 ${y.toFixed(1)}`;
+        strokeD += `M 0 ${y.toFixed(1)}`;
+      } else {
+        fillD += ` L ${x.toFixed(1)} ${prevY.toFixed(1)} L ${x.toFixed(1)} ${y.toFixed(1)}`;
+        strokeD += ` L ${x.toFixed(1)} ${prevY.toFixed(1)} L ${x.toFixed(1)} ${y.toFixed(1)}`;
+      }
+      prevY = y;
+    });
+    fillD += ` L ${w} ${prevY.toFixed(1)} L ${w} ${h} Z`;
+
+    const fill = document.createElementNS(svgNS, 'path');
+    fill.setAttribute('d', fillD);
+    fill.setAttribute('fill', `rgba(255, 163, 71, ${fillOpacity})`);
+    svg.appendChild(fill);
+
+    const stroke = document.createElementNS(svgNS, 'path');
+    stroke.setAttribute('d', strokeD);
+    stroke.setAttribute('fill', 'none');
+    stroke.setAttribute('stroke', `rgba(255, 179, 71, ${strokeOpacity})`);
+    stroke.setAttribute('stroke-width', '1');
+    svg.appendChild(stroke);
+  };
+
+  layer('load', 0.10, 0.5);
+  layer('cpu', 0.16, 0.75);
+  return svg;
+}
+
 function vitalCard(title, rightText, rightTone) {
-  // vital-flash plays automatically on insertion — no need to retrigger it
-  // by hand like #vitals-age's pulse, because renderVitals() throws every
-  // card away and builds fresh ones each cycle, so this IS a fresh element
-  // every single time.
-  const card = el('div', 'vital vital-flash');
+  const card = el('div', 'vital');
   const head = el('div', 'vital-head');
   const right = el('span', toneClass(rightTone), rightText);
   head.append(el('span', null, title), right);
@@ -93,6 +156,7 @@ function renderVitals(v, containers, runningCount, totalCount) {
   rail.replaceChildren();
   if (!v) return;
   const prev = prevVitals;
+  pushHistory(v);
 
   // HOST
   const host = vitalCard('HOST', v.cpu_pct >= 80 ? 'BUSY' : 'NOMINAL',
@@ -102,7 +166,8 @@ function renderVitals(v, containers, runningCount, totalCount) {
     meter('MEMORY', v.mem_pct, v.mem_pct, prev && prev.mem_pct),
     meter('LOAD', v.load1, v.load_pct, prev && prev.load1, 2, ''),
   );
-  host.append(el('div', 'vital-note', `${v.cores} CORES · UP ${v.uptime_days} DAYS`));
+  host.append(hostGraph(hostHistory));
+  host.append(el('div', 'vital-note', `${v.cores} CORES · UP ${v.uptime_days} DAYS · LAST 5 MIN ABOVE`));
   rail.append(host);
 
   // THIN POOL — the one that can take the whole lab down at once
@@ -386,15 +451,7 @@ async function refresh() {
     renderWorkshop(s.workshop, s.vitals);
     applyFilter();
 
-    const ageEl = $('#vitals-age');
-    ageEl.textContent = 'LIVE · ' + new Date().toLocaleTimeString('en-GB', { hour12: false });
-    // Restart the pulse animation even if it's already mid-flash from the
-    // last cycle: removing the class, forcing layout to notice (reading
-    // offsetWidth), then re-adding it is the standard trick for that.
-    ageEl.classList.remove('pulse');
-    void ageEl.offsetWidth;
-    ageEl.classList.add('pulse');
-
+    $('#vitals-age').textContent = 'LIVE · ' + new Date().toLocaleTimeString('en-GB', { hour12: false });
     $('#foot-right').textContent = 'NODE ' + (s.node || '?').toUpperCase();
     $('#foot-right').className = '';
   } catch (err) {

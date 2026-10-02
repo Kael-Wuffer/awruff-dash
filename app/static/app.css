@@ -138,26 +138,12 @@ main { padding: 28px var(--gutter) 0; }
 .rule-line { flex-grow: 1; height: 1px; background: var(--line); }
 .rule-meta { font-size: 9px; letter-spacing: 0.18em; color: var(--faint); }
 
-/* A brief flash on #vitals-age every time a refresh actually completes —
-   proof of life for the stretches where every number legitimately stays
-   the same (idle CPU, flat memory, untouched disk). */
-@keyframes live-pulse {
-  0%   { color: var(--amber); text-shadow: 0 0 8px rgba(255, 179, 71, 0.85); }
-  100% { color: var(--faint); text-shadow: none; }
-}
-.rule-meta.pulse { animation: live-pulse 0.6s ease-out; }
 
 /* ---------- vitals ---------- */
 .rail {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px; margin-bottom: 30px;
 }
-@keyframes vital-flash {
-  0%   { border-color: var(--line-strong); box-shadow: inset 0 0 22px rgba(255, 163, 71, 0.16); }
-  100% { border-color: var(--line); box-shadow: none; }
-}
-.vital-flash { animation: vital-flash 0.6s ease-out; }
-
 .vital {
   background: var(--panel); border: 1px solid var(--line);
   border-radius: 2px; padding: 16px 18px 18px;
@@ -170,6 +156,8 @@ main { padding: 28px var(--gutter) 0; }
 .vital-big { font-size: 30px; color: var(--amber); line-height: 1; }
 .vital-big small { font-size: 14px; color: var(--dim); }
 .vital-note { font-size: 9px; letter-spacing: 0.14em; color: var(--faint); margin-top: 11px; line-height: 1.7; }
+
+.host-graph { display: block; width: 100%; height: 44px; margin-top: 10px; }
 
 .meter { margin-bottom: 13px; }
 .meter-head {
