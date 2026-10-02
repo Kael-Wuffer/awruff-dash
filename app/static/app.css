@@ -158,7 +158,18 @@ main { padding: 28px var(--gutter) 0; }
 .vital-note { font-size: 9px; letter-spacing: 0.14em; color: var(--faint); margin-top: 11px; line-height: 1.7; }
 
 .vital-wide { grid-column: 1 / -1; }
-.host-graph { display: block; width: 100%; height: 64px; margin-top: 4px; }
+.host-graph { display: block; width: 100%; height: 130px; margin-top: 4px; }
+.activity-scroll { will-change: transform; }
+.graph-grid { stroke: rgba(255, 163, 71, 0.15); stroke-width: 1; }
+.graph-axis-label {
+  font-family: 'IBM Plex Mono', monospace; font-size: 15px;
+  fill: var(--faint); letter-spacing: 0.05em;
+}
+.graph-readout {
+  font-family: 'IBM Plex Mono', monospace; font-size: 17px; font-weight: 600;
+  fill: var(--amber); letter-spacing: 0.04em;
+}
+.graph-readout-dim { fill: var(--dim); font-weight: 400; }
 
 .meter { margin-bottom: 13px; }
 .meter-head {

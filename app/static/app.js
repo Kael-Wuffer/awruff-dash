@@ -74,68 +74,182 @@ function meter(label, value, pct, prev, decimals = 1, suffix = '%') {
 /* Last 5 minutes of host CPU and load, remembered in the browser only —
    there's no history store yet, so this resets on reload. Real multi-day
    history is a Prometheus job for later; this is an honest preview of that
-   idea using data the page is already polling anyway. */
+   idea using data the page is already polling anyway.
+
+   The card itself is built once (ensureActivityCard) and updated in place
+   on every poll, rather than torn down and rebuilt like the vitals cards —
+   that's what makes a real CSS transition possible: you can't smoothly
+   animate an element into existence, only change one that already exists. */
 const HISTORY_MAX = 30; // 30 x 10s polls = 5 minutes
 const hostHistory = [];
+const ACTIVITY_W = 1000, ACTIVITY_H = 170;
+const PLOT_TOP = 16, PLOT_H = 96; // mountains live in this band
+const SCROLL_MS = 900;
 
+const svgEl = (tag, attrs) => {
+  const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  return n;
+};
+
+/* Returns true if this push is retiring an old point — i.e. the moment that
+   should scroll rather than just grow. hostHistory is left one point longer
+   than HISTORY_MAX in that case, on purpose: the caller draws that wider
+   window first (so the new point can slide in from off-screen) and trims it
+   back down only after the slide finishes. */
 function pushHistory(v) {
+  const wasFull = hostHistory.length >= HISTORY_MAX;
   hostHistory.push({ cpu: v.cpu_pct, load: v.load_pct });
-  if (hostHistory.length > HISTORY_MAX) hostHistory.shift();
+  return wasFull;
 }
 
-/* Two stacked, semi-transparent "mountains" — CPU brighter/on top, load
-   dimmer/underneath. Stepped rather than curved to match the segmented
-   meters everywhere else. Y-axis auto-scales to whatever's actually in the
-   window, so real movement stays visible even when both numbers are small. */
-function hostGraph(history) {
-  const w = 280, h = 44;
-  const svgNS = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(svgNS, 'svg');
-  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-  svg.setAttribute('class', 'host-graph');
-  svg.setAttribute('preserveAspectRatio', 'none');
+let activityEls = null;
 
-  if (history.length < 2) return svg;
+function ensureActivityCard() {
+  if (activityEls) return activityEls;
 
-  const allValues = history.flatMap((p) => [p.cpu, p.load]);
-  const maxY = Math.max(20, ...allValues) * 1.15;
-  const stepX = w / (history.length - 1);
+  const card = vitalCard('ACTIVITY', '5 MIN', 'muted');
+  card.classList.add('vital-wide');
 
-  const layer = (key, fillOpacity, strokeOpacity) => {
-    const values = history.map((p) => p[key]);
-    let fillD = `M 0 ${h}`;
-    let strokeD = '';
-    let prevY = null;
-    values.forEach((val, i) => {
-      const x = i * stepX;
-      const y = h - (val / maxY) * h;
-      if (prevY === null) {
-        fillD += ` L 0 ${y.toFixed(1)}`;
-        strokeD += `M 0 ${y.toFixed(1)}`;
-      } else {
-        fillD += ` L ${x.toFixed(1)} ${prevY.toFixed(1)} L ${x.toFixed(1)} ${y.toFixed(1)}`;
-        strokeD += ` L ${x.toFixed(1)} ${prevY.toFixed(1)} L ${x.toFixed(1)} ${y.toFixed(1)}`;
-      }
-      prevY = y;
-    });
-    fillD += ` L ${w} ${prevY.toFixed(1)} L ${w} ${h} Z`;
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${ACTIVITY_W} ${ACTIVITY_H}`, class: 'host-graph', preserveAspectRatio: 'none',
+  });
 
-    const fill = document.createElementNS(svgNS, 'path');
-    fill.setAttribute('d', fillD);
-    fill.setAttribute('fill', `rgba(255, 163, 71, ${fillOpacity})`);
-    svg.appendChild(fill);
+  // Two faint horizontal gridlines (half-scale and full-scale) with their
+  // own live labels — the actual "where does this line say we are" part.
+  const grid50 = svgEl('line', { class: 'graph-grid' });
+  const grid100 = svgEl('line', { class: 'graph-grid' });
+  const label50 = svgEl('text', { class: 'graph-axis-label', x: 4 });
+  const label100 = svgEl('text', { class: 'graph-axis-label', x: 4 });
 
-    const stroke = document.createElementNS(svgNS, 'path');
-    stroke.setAttribute('d', strokeD);
-    stroke.setAttribute('fill', 'none');
-    stroke.setAttribute('stroke', `rgba(255, 179, 71, ${strokeOpacity})`);
-    stroke.setAttribute('stroke-width', '1');
-    svg.appendChild(stroke);
+  // The part that actually slides. overflow:hidden on the card (see CSS)
+  // crops whatever extends past the left/right edge while it's mid-slide.
+  const scrollGroup = svgEl('g', { class: 'activity-scroll' });
+  const fillLoad = svgEl('path', { fill: 'rgba(255, 163, 71, 0.10)' });
+  const fillCpu = svgEl('path', { fill: 'rgba(255, 163, 71, 0.17)' });
+  const strokeLoad = svgEl('path', { fill: 'none', stroke: 'rgba(255, 179, 71, 0.5)', 'stroke-width': '2' });
+  const strokeCpu = svgEl('path', { fill: 'none', stroke: 'rgba(255, 179, 71, 0.85)', 'stroke-width': '2' });
+  scrollGroup.append(fillLoad, fillCpu, strokeLoad, strokeCpu);
+
+  // Readouts pinned to the right edge — not part of the scrolling group, so
+  // they hold the old value steady through the slide and snap to the new
+  // one exactly when the new point finishes arriving, not before.
+  const readoutCpu = svgEl('text', { class: 'graph-readout', x: ACTIVITY_W - 4, 'text-anchor': 'end' });
+  const readoutLoad = svgEl('text', { class: 'graph-readout graph-readout-dim', x: ACTIVITY_W - 4, 'text-anchor': 'end' });
+
+  const timeStart = svgEl('text', { class: 'graph-axis-label', x: 4, y: ACTIVITY_H - 6 });
+  timeStart.textContent = '-5 MIN';
+  const timeEnd = svgEl('text', { class: 'graph-axis-label', x: ACTIVITY_W - 4, y: ACTIVITY_H - 6, 'text-anchor': 'end' });
+  timeEnd.textContent = 'NOW';
+
+  svg.append(grid50, grid100, label50, label100, scrollGroup, readoutCpu, readoutLoad, timeStart, timeEnd);
+  card.append(svg);
+  card.append(el('div', 'vital-note', 'CPU (bright) over LOAD (dim) — resets on reload'));
+  $('#activity-wrap').append(card);
+
+  activityEls = {
+    card, svg, grid50, grid100, label50, label100,
+    scrollGroup, fillLoad, fillCpu, strokeLoad, strokeCpu,
+    readoutCpu, readoutLoad,
   };
+  return activityEls;
+}
 
-  layer('load', 0.10, 0.5);
-  layer('cpu', 0.16, 0.75);
-  return svg;
+/* Builds the fill+stroke path data for one series over a set of points
+   already spaced stepX apart, starting at startX. Point-to-point rather
+   than stepped — real spikes and dips, deliberately different in character
+   from the squared-off meters and tiles everywhere else on the page. */
+function mountainPath(values, stepX, startX, maxY) {
+  let fillD = `M ${startX} ${PLOT_TOP + PLOT_H}`;
+  let strokeD = '';
+  let lastY = null;
+  values.forEach((val, i) => {
+    const x = startX + i * stepX;
+    const y = PLOT_TOP + PLOT_H - (val / maxY) * PLOT_H;
+    fillD += ` L ${x.toFixed(1)} ${y.toFixed(1)}`;
+    strokeD += (lastY === null ? 'M' : 'L') + ` ${x.toFixed(1)} ${y.toFixed(1)}`;
+    lastY = y;
+  });
+  const lastX = startX + (values.length - 1) * stepX;
+  fillD += ` L ${lastX} ${PLOT_TOP + PLOT_H} Z`;
+  return { fillD, strokeD, lastY };
+}
+
+function drawGrid(maxY) {
+  const { grid50, grid100, label50, label100 } = ensureActivityCard();
+  [[grid50, label50, 0.5], [grid100, label100, 1]].forEach(([line, label, frac]) => {
+    const y = PLOT_TOP + PLOT_H - PLOT_H * frac;
+    line.setAttribute('x1', 0); line.setAttribute('x2', ACTIVITY_W);
+    line.setAttribute('y1', y.toFixed(1)); line.setAttribute('y2', y.toFixed(1));
+    label.setAttribute('y', (y - 4).toFixed(1));
+    label.textContent = Math.round(maxY * frac) + '%';
+  });
+}
+
+/* The actual draw step. wide=true draws HISTORY_MAX+1 points at their
+   about-to-scroll positions (one step further right than normal) with no
+   transition — a pure data update that looks identical to the steady state,
+   since the extra point is clipped off-screen. Call triggerScroll() right
+   after to animate it sliding into place. */
+function drawActivity(history, maxY, wide) {
+  const { fillLoad, fillCpu, strokeLoad, strokeCpu, readoutCpu, readoutLoad, scrollGroup } = ensureActivityCard();
+  const stepX = ACTIVITY_W / (HISTORY_MAX - 1);
+  const startX = wide ? -stepX : 0;
+  scrollGroup.style.transform = 'translateX(0px)';
+
+  const load = mountainPath(history.map((p) => p.load), stepX, startX, maxY);
+  const cpu = mountainPath(history.map((p) => p.cpu), stepX, startX, maxY);
+  fillLoad.setAttribute('d', load.fillD);
+  strokeLoad.setAttribute('d', load.strokeD);
+  fillCpu.setAttribute('d', cpu.fillD);
+  strokeCpu.setAttribute('d', cpu.strokeD);
+
+  if (!wide) {
+    const last = history[history.length - 1];
+    readoutCpu.textContent = 'CPU ' + last.cpu.toFixed(1) + '%';
+    readoutCpu.setAttribute('y', (cpu.lastY - 6).toFixed(1));
+    readoutLoad.textContent = 'LOAD ' + last.load.toFixed(1) + '%';
+    readoutLoad.setAttribute('y', (load.lastY + 13).toFixed(1));
+  }
+}
+
+/* Deliberately setInterval, not a CSS transition: tested it directly and a
+   CSS transition freezes in place the moment this window isn't focused,
+   same failure as requestAnimationFrame earlier — just less obvious, since
+   it's the browser's compositor doing it rather than application code.
+   setInterval is the one thing proven to keep running regardless. */
+function triggerScroll() {
+  const { scrollGroup } = ensureActivityCard();
+  const stepX = ACTIVITY_W / (HISTORY_MAX - 1);
+  const start = Date.now();
+  const timer = setInterval(() => {
+    const t = Math.min(1, (Date.now() - start) / SCROLL_MS);
+    scrollGroup.style.transform = `translateX(${(-stepX * t).toFixed(2)}px)`;
+    if (t >= 1) clearInterval(timer);
+  }, 40);
+}
+
+function renderActivity(v) {
+  if (!v) return;
+  const wasFull = pushHistory(v);
+  ensureActivityCard();
+
+  const allValues = hostHistory.flatMap((p) => [p.cpu, p.load]);
+  const maxY = Math.max(20, ...allValues) * 1.15;
+  drawGrid(maxY);
+
+  if (hostHistory.length < 2) return;
+
+  if (wasFull) {
+    drawActivity(hostHistory, maxY, true);
+    triggerScroll();
+    setTimeout(() => {
+      hostHistory.shift();
+      drawActivity(hostHistory, maxY, false);
+    }, SCROLL_MS + 40);
+  } else {
+    drawActivity(hostHistory, maxY, false);
+  }
 }
 
 function vitalCard(title, rightText, rightTone) {
@@ -156,7 +270,6 @@ function renderVitals(v, containers, runningCount, totalCount) {
   rail.replaceChildren();
   if (!v) return;
   const prev = prevVitals;
-  pushHistory(v);
 
   // HOST
   const host = vitalCard('HOST', v.cpu_pct >= 80 ? 'BUSY' : 'NOMINAL',
@@ -243,14 +356,6 @@ function renderVitals(v, containers, runningCount, totalCount) {
     ct.append(row);
   });
   rail.append(ct);
-
-  // ACTIVITY — its own full-width card, not squeezed into HOST, so the
-  // other three stay short and the trace itself gets more room to read.
-  const activity = vitalCard('ACTIVITY', '5 MIN', 'muted');
-  activity.classList.add('vital-wide');
-  activity.append(hostGraph(hostHistory));
-  activity.append(el('div', 'vital-note', 'CPU (bright) over LOAD (dim) — resets on reload'));
-  rail.append(activity);
 
   prevVitals = v;
 }
@@ -453,6 +558,7 @@ async function refresh() {
 
     renderErrors(s.errors);
     renderVitals(s.vitals, s.containers || [], s.running_count || 0, s.total_count || 0);
+    renderActivity(s.vitals);
     renderGroups(s.groups || []);
     renderSummary(s.groups || []);
     renderWorkshop(s.workshop, s.vitals);
