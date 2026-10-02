@@ -111,18 +111,21 @@ function ensureActivityCard() {
   const card = vitalCard('ACTIVITY', '5 MIN', 'muted');
   card.classList.add('vital-wide');
 
+  // The SVG holds ONLY shapes — no text. Text inside a viewBox that gets
+  // stretched to an arbitrary card width (preserveAspectRatio: none, since
+  // the mountains themselves don't care about proportion) comes out visibly
+  // warped, which is exactly what happened the first time. Labels are
+  // ordinary HTML laid over the top instead, positioned by percentage, so
+  // they stay normal, crisp text regardless of how the card is stretched.
+  const wrap = el('div', 'host-graph-wrap');
   const svg = svgEl('svg', {
     viewBox: `0 0 ${ACTIVITY_W} ${ACTIVITY_H}`, class: 'host-graph', preserveAspectRatio: 'none',
   });
 
-  // Two faint horizontal gridlines (half-scale and full-scale) with their
-  // own live labels — the actual "where does this line say we are" part.
   const grid50 = svgEl('line', { class: 'graph-grid' });
   const grid100 = svgEl('line', { class: 'graph-grid' });
-  const label50 = svgEl('text', { class: 'graph-axis-label', x: 4 });
-  const label100 = svgEl('text', { class: 'graph-axis-label', x: 4 });
 
-  // The part that actually slides. overflow:hidden on the card (see CSS)
+  // The part that actually slides. overflow:hidden on the wrap (see CSS)
   // crops whatever extends past the left/right edge while it's mid-slide.
   const scrollGroup = svgEl('g', { class: 'activity-scroll' });
   const fillLoad = svgEl('path', { fill: 'rgba(255, 163, 71, 0.10)' });
@@ -130,20 +133,25 @@ function ensureActivityCard() {
   const strokeLoad = svgEl('path', { fill: 'none', stroke: 'rgba(255, 179, 71, 0.5)', 'stroke-width': '2' });
   const strokeCpu = svgEl('path', { fill: 'none', stroke: 'rgba(255, 179, 71, 0.85)', 'stroke-width': '2' });
   scrollGroup.append(fillLoad, fillCpu, strokeLoad, strokeCpu);
+  svg.append(grid50, grid100, scrollGroup);
+
+  const label50 = el('div', 'graph-axis-label graph-label-50');
+  const label100 = el('div', 'graph-axis-label graph-label-100');
 
   // Readouts pinned to the right edge — not part of the scrolling group, so
   // they hold the old value steady through the slide and snap to the new
   // one exactly when the new point finishes arriving, not before.
-  const readoutCpu = svgEl('text', { class: 'graph-readout', x: ACTIVITY_W - 4, 'text-anchor': 'end' });
-  const readoutLoad = svgEl('text', { class: 'graph-readout graph-readout-dim', x: ACTIVITY_W - 4, 'text-anchor': 'end' });
+  const readoutCpu = el('div', 'graph-readout');
+  const readoutLoad = el('div', 'graph-readout graph-readout-dim');
 
-  const timeStart = svgEl('text', { class: 'graph-axis-label', x: 4, y: ACTIVITY_H - 6 });
-  timeStart.textContent = '-5 MIN';
-  const timeEnd = svgEl('text', { class: 'graph-axis-label', x: ACTIVITY_W - 4, y: ACTIVITY_H - 6, 'text-anchor': 'end' });
-  timeEnd.textContent = 'NOW';
+  const timeStart = el('div', 'graph-axis-label graph-time-start', '-5 MIN');
+  const timeEnd = el('div', 'graph-axis-label graph-time-end', 'NOW');
 
-  svg.append(grid50, grid100, label50, label100, scrollGroup, readoutCpu, readoutLoad, timeStart, timeEnd);
-  card.append(svg);
+  const labels = el('div', 'host-graph-labels');
+  labels.append(label50, label100, readoutCpu, readoutLoad, timeStart, timeEnd);
+
+  wrap.append(svg, labels);
+  card.append(wrap);
   card.append(el('div', 'vital-note', 'CPU (bright) over LOAD (dim) — resets on reload'));
   $('#activity-wrap').append(card);
 
@@ -181,7 +189,7 @@ function drawGrid(maxY) {
     const y = PLOT_TOP + PLOT_H - PLOT_H * frac;
     line.setAttribute('x1', 0); line.setAttribute('x2', ACTIVITY_W);
     line.setAttribute('y1', y.toFixed(1)); line.setAttribute('y2', y.toFixed(1));
-    label.setAttribute('y', (y - 4).toFixed(1));
+    label.style.top = (y / ACTIVITY_H * 100).toFixed(2) + '%';
     label.textContent = Math.round(maxY * frac) + '%';
   });
 }
@@ -193,7 +201,12 @@ function drawGrid(maxY) {
    after to animate it sliding into place. */
 function drawActivity(history, maxY, wide) {
   const { fillLoad, fillCpu, strokeLoad, strokeCpu, readoutCpu, readoutLoad, scrollGroup } = ensureActivityCard();
-  const stepX = ACTIVITY_W / (HISTORY_MAX - 1);
+  // Fixed spacing once the window is full (so a point slides by exactly one
+  // step at a time) — but while it's still filling up for the first time,
+  // stretch whatever points exist to fill the full width instead of drawing
+  // a stub stuck to the left edge. The two formulas agree exactly the
+  // moment history reaches HISTORY_MAX, so there's no seam between them.
+  const stepX = wide ? ACTIVITY_W / (HISTORY_MAX - 1) : ACTIVITY_W / (history.length - 1);
   const startX = wide ? -stepX : 0;
   scrollGroup.style.transform = 'translateX(0px)';
 
@@ -207,9 +220,21 @@ function drawActivity(history, maxY, wide) {
   if (!wide) {
     const last = history[history.length - 1];
     readoutCpu.textContent = 'CPU ' + last.cpu.toFixed(1) + '%';
-    readoutCpu.setAttribute('y', (cpu.lastY - 6).toFixed(1));
     readoutLoad.textContent = 'LOAD ' + last.load.toFixed(1) + '%';
-    readoutLoad.setAttribute('y', (load.lastY + 13).toFixed(1));
+
+    // Two independent lines can land on nearly the same value — push the
+    // labels apart by a minimum gap so they never overlap into an unreadable
+    // mess, regardless of how close the actual numbers are.
+    let cpuPct = cpu.lastY / ACTIVITY_H * 100;
+    let loadPct = load.lastY / ACTIVITY_H * 100;
+    const minGap = 9;
+    if (Math.abs(cpuPct - loadPct) < minGap) {
+      const mid = (cpuPct + loadPct) / 2;
+      if (cpuPct <= loadPct) { cpuPct = mid - minGap / 2; loadPct = mid + minGap / 2; }
+      else { cpuPct = mid + minGap / 2; loadPct = mid - minGap / 2; }
+    }
+    readoutCpu.style.top = cpuPct.toFixed(2) + '%';
+    readoutLoad.style.top = loadPct.toFixed(2) + '%';
   }
 }
 

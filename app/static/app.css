@@ -158,18 +158,33 @@ main { padding: 28px var(--gutter) 0; }
 .vital-note { font-size: 9px; letter-spacing: 0.14em; color: var(--faint); margin-top: 11px; line-height: 1.7; }
 
 .vital-wide { grid-column: 1 / -1; }
-.host-graph { display: block; width: 100%; height: 130px; margin-top: 4px; }
+.host-graph-wrap {
+  position: relative; width: 100%; height: 130px; margin-top: 4px; overflow: hidden;
+}
+.host-graph { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .activity-scroll { will-change: transform; }
 .graph-grid { stroke: rgba(255, 163, 71, 0.15); stroke-width: 1; }
+
+/* Plain HTML text laid over the SVG, not inside it — the SVG's viewBox gets
+   stretched non-uniformly to fit the card (preserveAspectRatio: none, since
+   the mountains don't care about proportion), and text dragged along with
+   that stretch comes out visibly warped. Ordinary positioned HTML doesn't
+   have that problem, so all the labels live here instead. */
+.host-graph-labels {
+  position: absolute; inset: 0; pointer-events: none;
+  font-family: 'IBM Plex Mono', monospace;
+}
 .graph-axis-label {
-  font-family: 'IBM Plex Mono', monospace; font-size: 15px;
-  fill: var(--faint); letter-spacing: 0.05em;
+  position: absolute; left: 4px; font-size: 10px;
+  color: var(--faint); letter-spacing: 0.05em; transform: translateY(-100%);
 }
 .graph-readout {
-  font-family: 'IBM Plex Mono', monospace; font-size: 17px; font-weight: 600;
-  fill: var(--amber); letter-spacing: 0.04em;
+  position: absolute; right: 4px; font-size: 11px; font-weight: 600;
+  color: var(--amber); letter-spacing: 0.04em; transform: translateY(-50%);
 }
-.graph-readout-dim { fill: var(--dim); font-weight: 400; }
+.graph-readout-dim { color: var(--dim); font-weight: 400; }
+.graph-time-start, .graph-time-end { bottom: 4px; transform: none; }
+.graph-time-end { right: 4px; left: auto; }
 
 .meter { margin-bottom: 13px; }
 .meter-head {
